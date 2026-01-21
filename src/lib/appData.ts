@@ -51,6 +51,16 @@ export type WorkoutSession = {
   updatedAt: string
 }
 
+export type DiaryEntry = {
+  id: string
+  date: string // YYYY-MM-DD
+  content: string
+  mood?: 'great' | 'good' | 'okay' | 'bad' | 'terrible'
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type AppSettings = {
   locale: string
   currency: string
@@ -62,6 +72,7 @@ export type AppDataV1 = {
   tasks: Task[]
   money: MoneyData
   workouts: WorkoutSession[]
+  diary: DiaryEntry[]
 }
 
 export const APP_DATA_LS_KEY = 'pa.data.v1'
@@ -76,6 +87,7 @@ export function createEmptyAppDataV1(): AppDataV1 {
       categories: ['Еда', 'Транспорт', 'Дом', 'Здоровье', 'Развлечения', 'Подписки', 'Прочее', 'Зарплата'],
     },
     workouts: [],
+    diary: [],
   }
 }
 

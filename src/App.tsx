@@ -3,20 +3,22 @@ import './App.css'
 import { TasksPage } from './features/tasks/TasksPage'
 import { MoneyPage } from './features/money/MoneyPage'
 import { WorkoutsPage } from './features/workouts/WorkoutsPage'
-import { useLocalStorageState } from './lib/useLocalStorageState'
+import { CalendarPage } from './features/calendar/CalendarPage'
 import type { AppDataV1 } from './lib/appData'
 import { APP_DATA_LS_KEY, createEmptyAppDataV1 } from './lib/appData'
 import { exportJson, importJsonFromFile } from './lib/jsonIO'
+import { usePersistentStoreState } from './lib/usePersistentStore'
 
-type TabKey = 'tasks' | 'money' | 'workouts'
+type TabKey = 'tasks' | 'money' | 'workouts' | 'calendar'
 
 export default function App() {
-  const [tab, setTab] = useLocalStorageState<TabKey>('pa.tab', 'tasks')
-  const [data, setData] = useLocalStorageState<AppDataV1>(
+  const [tab, setTab, tabReady] = usePersistentStoreState<TabKey>('pa.tab', 'tasks')
+  const [data, setData, dataReady] = usePersistentStoreState<AppDataV1>(
     APP_DATA_LS_KEY,
     createEmptyAppDataV1(),
   )
   const [status, setStatus] = useState<string | null>(null)
+  const hydrated = tabReady && dataReady
 
   const content = useMemo(() => {
     switch (tab) {
@@ -38,10 +40,45 @@ export default function App() {
             onChange={(workouts) => setData({ ...data, workouts })}
           />
         )
+      case 'calendar':
+        return (
+          <CalendarPage
+            tasks={data.tasks}
+            onTasksChange={(tasks) => setData({ ...data, tasks })}
+            money={data.money}
+            onMoneyChange={(money) => setData({ ...data, money })}
+            workouts={data.workouts}
+            onWorkoutsChange={(workouts) => setData({ ...data, workouts })}
+            diary={data.diary}
+            onDiaryChange={(diary) => setData({ ...data, diary })}
+            settings={data.settings}
+          />
+        )
       default:
         return null
     }
   }, [tab, data, setData])
+
+  if (!hydrated) {
+    return (
+      <div className="appShell">
+        <header className="topBar">
+          <div className="brand">
+            <div className="brandMark">PA</div>
+            <div className="brandText">
+              <div className="brandTitle">Личный помощник</div>
+              <div className="brandSub">таски · финансы · тренировки</div>
+            </div>
+          </div>
+        </header>
+        <main className="main">
+          <div className="card" style={{ textAlign: 'center' }}>
+            Загружаем данные из хранилища…
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="appShell">
@@ -50,7 +87,7 @@ export default function App() {
           <div className="brandMark">PA</div>
           <div className="brandText">
             <div className="brandTitle">Личный помощник</div>
-            <div className="brandSub">таски · финансы · тренировки</div>
+            <div className="brandSub">таски · финансы · тренировки · календарь</div>
           </div>
         </div>
 
@@ -75,6 +112,13 @@ export default function App() {
             type="button"
           >
             Тренировки
+          </button>
+          <button
+            className={tab === 'calendar' ? 'tab tabActive' : 'tab'}
+            onClick={() => setTab('calendar')}
+            type="button"
+          >
+            Календарь
           </button>
         </nav>
 
@@ -124,7 +168,7 @@ export default function App() {
       <main className="main">{content}</main>
 
       <footer className="footer">
-        <span>Данные хранятся локально в браузере (offline).</span>
+        <span>Данные хранятся в IndexedDB (офлайн, не привязаны к вкладке).</span>
       </footer>
     </div>
   )

@@ -158,3 +158,118 @@
     justify-content: space-between;
   }
 }
+
+/* Calendar styles */
+.calendar {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+}
+
+.calendarHeader {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendarDayHeader {
+  padding: 8px 4px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendarDay {
+  aspect-ratio: 1;
+  padding: 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  position: relative;
+}
+
+.calendarDay:hover {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.calendarDaySelected {
+  background: rgba(99, 102, 241, 0.2) !important;
+  border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+.calendarDayToday {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.calendarDayOtherMonth {
+  opacity: 0.4;
+}
+
+.calendarDayNumber {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
+  margin-bottom: 2px;
+}
+
+.calendarDayContent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.calendarIndicator {
+  font-size: 10px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  text-align: center;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.calendarIndicatorTasks {
+  background: rgba(99, 102, 241, 0.8);
+  color: white;
+}
+
+.calendarIndicatorMoney {
+  background: rgba(16, 185, 129, 0.8);
+  color: white;
+}
+
+.calendarIndicatorWorkouts {
+  background: rgba(245, 101, 101, 0.8);
+  color: white;
+}
+
+.calendarIndicatorDiary {
+  background: rgba(251, 191, 36, 0.8);
+  color: rgba(2, 6, 23, 1);
+}
+
+.diaryEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
