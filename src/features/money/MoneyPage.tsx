@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import type { AppSettings, MoneyData, MoneyTransaction, MoneyTxType } from '../../lib/appData'
+import { useEffect, useMemo, useState } from 'react'
+import type { AppSettings, MoneyData, MoneyTransaction, MoneyTxType, Account } from '../../lib/appData'
 import { todayISO, uid } from '../../lib/ids'
 
 type Props = {
@@ -17,9 +17,19 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
   const [type, setType] = useState<MoneyTxType>('expense')
   const [amount, setAmount] = useState<string>('')
   const [date, setDate] = useState<string>(todayISO())
-  const [category, setCategory] = useState<string>(money.categories[0] ?? 'Прочее')
+  const [category, setCategory] = useState<string>(money.categories?.[0] ?? 'Прочее')
+  const [accountId, setAccountId] = useState<string>(money.accounts?.[0]?.id ?? '')
   const [note, setNote] = useState<string>('')
   const [month, setMonth] = useState<string>(monthKey(todayISO()))
+
+  // Account creation state
+  const [newAccountName, setNewAccountName] = useState('')
+  const [newAccountIncludeInTotal, setNewAccountIncludeInTotal] = useState(true)
+
+  // UI state for expandable sections
+  const [showAccounts, setShowAccounts] = useState(false)
+  const [showCategories, setShowCategories] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   const fmt = useMemo(() => {
     try {
@@ -56,13 +66,61 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [txsForMonth])
 
+  // Calculate account balances based on transactions
+  const accountsWithBalances = useMemo(() => {
+    if (!money.accounts || money.accounts.length === 0) return []
+    const accountsMap = new Map(money.accounts.map(acc => [acc.id, { ...acc, calculatedBalance: acc.balance }]))
+
+    // Apply transactions to account balances
+    for (const tx of money.transactions) {
+      if (!tx.accountId) continue
+      const account = accountsMap.get(tx.accountId)
+      if (!account) continue
+
+      if (tx.type === 'income') {
+        account.calculatedBalance += tx.amount
+      } else {
+        account.calculatedBalance -= tx.amount
+      }
+    }
+
+    return Array.from(accountsMap.values())
+  }, [money.accounts, money.transactions])
+
+  // Calculate total balance (only accounts included in total)
+  const totalBalance = useMemo(() => {
+    return accountsWithBalances
+      .filter(acc => acc.includeInTotal)
+      .reduce((sum, acc) => sum + acc.calculatedBalance, 0)
+  }, [accountsWithBalances])
+
+  // Safety check - if no accounts, create default one
+  useEffect(() => {
+    if (!money.accounts || money.accounts.length === 0) {
+      const now = new Date().toISOString()
+      const defaultAccount = {
+        id: 'default',
+        name: 'Основной счёт',
+        balance: 0,
+        includeInTotal: true,
+        createdAt: now,
+        updatedAt: now,
+      }
+      onChange({
+        ...money,
+        accounts: [defaultAccount]
+      })
+    }
+  }, [money, onChange])
+
   return (
-    <div className="grid2">
+    <div className="pageContainer">
+      <div className="grid2">
       <section className="card">
         <div className="cardHeader">
           <div>
             <div className="cardTitle">Финансы</div>
-            <div className="muted" style={{ fontSize: 12 }}>Доходы/расходы по месяцам + быстрый ввод.</div>
+            <div className="muted" style={{ fontSize: 12 }}>Баланс и быстрый ввод операций</div>
           </div>
           <div className="row">
             <span className="pill">Месяц</span>
@@ -70,69 +128,201 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
           </div>
         </div>
 
-        <div className="grid3">
+        <div className="grid2">
           <div className="item">
-            <div className="muted">Доход</div>
-            <div className="itemTitle">{fmt.format(summary.income)}</div>
+            <div className="muted">Общий баланс</div>
+            <div className="itemTitle" style={{ color: totalBalance >= 0 ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)' }}>
+              {fmt.format(totalBalance)}
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              Только счета включённые в итог
+            </div>
           </div>
           <div className="item">
-            <div className="muted">Расход</div>
-            <div className="itemTitle">{fmt.format(summary.expense)}</div>
-          </div>
-          <div className="item">
-            <div className="muted">Итого</div>
+            <div className="muted">За месяц</div>
             <div className="itemTitle" style={{ color: summary.net >= 0 ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)' }}>
               {fmt.format(summary.net)}
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              {fmt.format(summary.income)} доход · {fmt.format(summary.expense)} расход
             </div>
           </div>
         </div>
 
         <hr className="hr" />
 
-        <div className="grid2">
-          <div className="item">
-            <div className="itemTop">
-              <div className="itemTitle">Категории (расходы)</div>
-              <span className="pill">{byCategory.length}</span>
+        {/* Quick access buttons */}
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className={`btn ${showCategories ? 'btnPrimary' : 'btnGhost'}`}
+            onClick={() => setShowCategories(!showCategories)}
+          >
+            Категории ({byCategory.length})
+          </button>
+          <button
+            className={`btn ${showAccounts ? 'btnPrimary' : 'btnGhost'}`}
+            onClick={() => setShowAccounts(!showAccounts)}
+          >
+            Счета ({accountsWithBalances.length})
+          </button>
+          <button
+            className={`btn ${showSettings ? 'btnPrimary' : 'btnGhost'}`}
+            onClick={() => setShowSettings(!showSettings)}
+          >
+            Настройки
+          </button>
+        </div>
+
+        {/* Expandable sections */}
+        {showCategories && (
+          <>
+            <hr className="hr" />
+            <div className="item">
+              <div className="itemTop">
+                <div className="itemTitle">Категории расходов</div>
+                <span className="pill">{byCategory.length}</span>
+              </div>
+              {byCategory.length === 0 ? (
+                <div className="muted">Пока нет расходов за выбранный месяц.</div>
+              ) : (
+                <div className="list">
+                  {byCategory.map(([cat, sum]) => (
+                    <div key={cat} className="row" style={{ justifyContent: 'space-between' }}>
+                      <span className="pill">{cat}</span>
+                      <span className="pill">{fmt.format(sum)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="field" style={{ marginTop: 12 }}>
+                <div className="label">Новая категория</div>
+                <div className="row">
+                  <input
+                    className="input"
+                    placeholder="Название категории"
+                    style={{ flex: 1 }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const value = (e.target as HTMLInputElement).value.trim()
+                        if (!value) return
+                        if (money.categories.includes(value)) return
+                        onChange({ ...money, categories: [...money.categories, value] })
+                        ;(e.target as HTMLInputElement).value = ''
+                      }
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-            {byCategory.length === 0 ? (
-              <div className="muted">Пока нет расходов за выбранный месяц.</div>
-            ) : (
-              <div className="list">
-                {byCategory.slice(0, 8).map(([cat, sum]) => (
-                  <div key={cat} className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="pill">{cat}</span>
-                    <span className="pill">{fmt.format(sum)}</span>
+          </>
+        )}
+
+        {showAccounts && (
+          <>
+            <hr className="hr" />
+            <div className="item">
+              <div className="itemTop">
+                <div className="itemTitle">Управление счетами</div>
+                <span className="pill">{accountsWithBalances.length}</span>
+              </div>
+              <div className="list" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {accountsWithBalances.map((account) => (
+                  <div key={account.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span className="pill">{account.name}</span>
+                      {!account.includeInTotal && (
+                        <span className="pill" style={{ background: 'rgba(156, 163, 175, 0.5)', marginLeft: 4 }}>
+                          Исключён
+                        </span>
+                      )}
+                    </div>
+                    <span className="pill" style={{
+                      color: account.calculatedBalance >= 0 ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)',
+                      fontWeight: 'bold'
+                    }}>
+                      {fmt.format(account.calculatedBalance)}
+                    </span>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+              <div className="field" style={{ marginTop: 12 }}>
+                <div className="label">Создать новый счёт</div>
+                <div className="row">
+                  <input
+                    className="input"
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(e.target.value)}
+                    placeholder="Название счёта"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      const name = newAccountName.trim()
+                      if (!name) return
+                      const now = new Date().toISOString()
+                      const newAccount: Account = {
+                        id: uid('account'),
+                        name,
+                        balance: 0,
+                        includeInTotal: newAccountIncludeInTotal,
+                        createdAt: now,
+                        updatedAt: now,
+                      }
+                      onChange({
+                        ...money,
+                        accounts: [...money.accounts, newAccount]
+                      })
+                      setNewAccountName('')
+                      setAccountId(newAccount.id) // Select newly created account
+                    }}
+                  >
+                    Создать
+                  </button>
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={newAccountIncludeInTotal}
+                      onChange={(e) => setNewAccountIncludeInTotal(e.target.checked)}
+                    />
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Включать в общий баланс
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
-          <div className="item">
-            <div className="itemTop">
-              <div className="itemTitle">Настройки</div>
-            </div>
-            <div className="grid2">
-              <div className="field">
-                <div className="label">Locale</div>
-                <input className="input" value={settings.locale} onChange={(e) => onSettingsChange({ ...settings, locale: e.target.value })} />
+        {showSettings && (
+          <>
+            <hr className="hr" />
+            <div className="item">
+              <div className="itemTitle">Настройки приложения</div>
+              <div className="grid2">
+                <div className="field">
+                  <div className="label">Локаль</div>
+                  <input className="input" value={settings.locale} onChange={(e) => onSettingsChange({ ...settings, locale: e.target.value })} />
+                </div>
+                <div className="field">
+                  <div className="label">Валюта</div>
+                  <input
+                    className="input"
+                    value={settings.currency}
+                    onChange={(e) => onSettingsChange({ ...settings, currency: e.target.value.toUpperCase() })}
+                    placeholder="RUB"
+                  />
+                </div>
               </div>
-              <div className="field">
-                <div className="label">Валюта</div>
-                <input
-                  className="input"
-                  value={settings.currency}
-                  onChange={(e) => onSettingsChange({ ...settings, currency: e.target.value.toUpperCase() })}
-                  placeholder="RUB"
-                />
+              <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+                Примеры: <span className="pill">ru-RU</span> + <span className="pill">RUB</span> | <span className="pill">en-US</span> + <span className="pill">USD</span>
               </div>
             </div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-              Пример: <span className="pill">ru-RU</span> + <span className="pill">RUB</span>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
 
         <hr className="hr" />
 
@@ -154,10 +344,17 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
                     <span className="pill">{t.category}</span>
                   </div>
                   <div className="row">
-                    <span className="pill" style={{ fontWeight: 800 }}>
-                      {t.type === 'income' ? '+' : '-'}
-                      {fmt.format(t.amount)}
-                    </span>
+                    <div>
+                      <span className="pill" style={{ fontWeight: 800 }}>
+                        {t.type === 'income' ? '+' : '-'}
+                        {fmt.format(t.amount)}
+                      </span>
+                      {t.accountId && (
+                        <span className="pill" style={{ marginLeft: 4, background: 'rgba(99, 102, 241, 0.2)' }}>
+                          {money.accounts.find(a => a.id === t.accountId)?.name ?? 'Неизвестный счёт'}
+                        </span>
+                      )}
+                    </div>
                     <button
                       className="btn btnDanger"
                       type="button"
@@ -238,6 +435,17 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
         </div>
 
         <div className="field">
+          <div className="label">Счёт</div>
+          <select className="select" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            {accountsWithBalances.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name} ({fmt.format(account.calculatedBalance)})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
           <div className="label">Заметка</div>
           <textarea className="textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="магазин, комментарий, ссылка…" />
         </div>
@@ -250,7 +458,8 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
               setType('expense')
               setAmount('')
               setDate(todayISO())
-              setCategory(money.categories[0] ?? 'Прочее')
+              setCategory(money.categories?.[0] ?? 'Прочее')
+              setAccountId(money.accounts?.[0]?.id ?? '')
               setNote('')
             }}
           >
@@ -262,7 +471,7 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
             type="button"
             onClick={() => {
               const parsed = Number(String(amount).replace(',', '.'))
-              if (!Number.isFinite(parsed) || parsed <= 0) return
+              if (!Number.isFinite(parsed) || parsed <= 0 || !accountId) return
               const now = new Date().toISOString()
               const tx: MoneyTransaction = {
                 id: uid('tx'),
@@ -270,6 +479,7 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
                 type,
                 amount: parsed,
                 category: category.trim() || 'Прочее',
+                accountId,
                 note: note.trim() ? note.trim() : undefined,
                 createdAt: now,
                 updatedAt: now,
@@ -284,6 +494,7 @@ export function MoneyPage({ money, onChange, settings, onSettingsChange }: Props
           </button>
         </div>
       </aside>
+    </div>
     </div>
   )
 }

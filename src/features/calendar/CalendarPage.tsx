@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { Task, MoneyData, WorkoutSession, DiaryEntry, AppSettings } from '../../lib/appData'
-import { todayISO } from '../../lib/ids'
+import type { Task, MoneyData, WorkoutSession, CalendarEvent, AppSettings } from '../../lib/appData'
+import { todayISO, uid } from '../../lib/ids'
+import { exportJson } from '../../lib/jsonIO'
 
 type Props = {
   tasks: Task[]
@@ -9,8 +10,8 @@ type Props = {
   onMoneyChange: (money: MoneyData) => void
   workouts: WorkoutSession[]
   onWorkoutsChange: (workouts: WorkoutSession[]) => void
-  diary: DiaryEntry[]
-  onDiaryChange: (diary: DiaryEntry[]) => void
+  events: CalendarEvent[]
+  onEventsChange: (events: CalendarEvent[]) => void
   settings: AppSettings
 }
 
@@ -43,57 +44,58 @@ export function CalendarPage({
   onTasksChange,
   money,
   workouts,
-  diary,
-  onDiaryChange,
+  events,
+  onEventsChange,
   settings,
 }: Props) {
-  const [currentDate, setCurrentDate] = useState(() => {
+  const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
   })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
-  const days = useMemo(() => getDaysInMonth(currentDate.year, currentDate.month), [currentDate])
+  const days = useMemo(() => getDaysInMonth(currentMonth.year, currentMonth.month), [currentMonth])
 
   const dayData = useMemo(() => {
     const map = new Map<string, {
       tasks: Task[]
       transactions: typeof money.transactions
       workouts: WorkoutSession[]
-      diaryEntry?: DiaryEntry
+      events: CalendarEvent[]
     }>()
 
     // Tasks
     for (const task of tasks) {
-      if (!task.dueDate) continue
-      const existing = map.get(task.dueDate) || { tasks: [], transactions: [], workouts: [] }
-      existing.tasks.push(task)
-      map.set(task.dueDate, existing)
+      if (task.dueDate) {
+        const existing = map.get(task.dueDate) || { tasks: [], transactions: [], workouts: [], events: [] }
+        existing.tasks.push(task)
+        map.set(task.dueDate, existing)
+      }
     }
 
     // Transactions
     for (const tx of money.transactions) {
-      const existing = map.get(tx.date) || { tasks: [], transactions: [], workouts: [] }
+      const existing = map.get(tx.date) || { tasks: [], transactions: [], workouts: [], events: [] }
       existing.transactions.push(tx)
       map.set(tx.date, existing)
     }
 
     // Workouts
     for (const workout of workouts) {
-      const existing = map.get(workout.date) || { tasks: [], transactions: [], workouts: [] }
+      const existing = map.get(workout.date) || { tasks: [], transactions: [], workouts: [], events: [] }
       existing.workouts.push(workout)
       map.set(workout.date, existing)
     }
 
-    // Diary
-    for (const entry of diary) {
-      const existing = map.get(entry.date) || { tasks: [], transactions: [], workouts: [] }
-      existing.diaryEntry = entry
-      map.set(entry.date, existing)
+    // Events
+    for (const event of events) {
+      const existing = map.get(event.date) || { tasks: [], transactions: [], workouts: [], events: [] }
+      existing.events.push(event)
+      map.set(event.date, existing)
     }
 
     return map
-  }, [tasks, money.transactions, workouts, diary])
+  }, [tasks, money.transactions, workouts, events])
 
   const selectedDayData = selectedDate ? dayData.get(selectedDate) : null
 
@@ -105,307 +107,454 @@ export function CalendarPage({
     }
   }, [settings.currency, settings.locale])
 
-  const navigateMonth = (direction: 'prev' | 'next') => {
-    setCurrentDate(prev => {
-      const newMonth = direction === 'next' ? prev.month + 1 : prev.month - 1
-      const newYear = newMonth > 11 ? prev.year + 1 : newMonth < 0 ? prev.year - 1 : prev.year
-      const normalizedMonth = newMonth > 11 ? 0 : newMonth < 0 ? 11 : newMonth
-      return { year: newYear, month: normalizedMonth }
-    })
+  const exportDayData = () => {
+    if (!selectedDate || !selectedDayData) return
+
+    const transactionsWithAccounts = selectedDayData.transactions.map(tx => ({
+      ...tx,
+      account: money.accounts.find(acc => acc.id === tx.accountId)?.name || 'Неизвестный счёт'
+    }))
+
+    const dayData = {
+      date: selectedDate,
+      exportedAt: new Date().toISOString(),
+      tasks: selectedDayData.tasks,
+      transactions: transactionsWithAccounts,
+      workouts: selectedDayData.workouts,
+      events: selectedDayData.events,
+      summary: {
+        tasksCount: selectedDayData.tasks.length,
+        transactionsCount: selectedDayData.transactions.length,
+        workoutsCount: selectedDayData.workouts.length,
+        eventsCount: selectedDayData.events.length
+      }
+    }
+
+    const filename = `day-export-${selectedDate}.json`
+    exportJson(dayData, filename)
   }
 
-  const monthNames = [
-    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
-  ]
-
   return (
-    <div className="grid2">
-      <section className="card">
-        <div className="cardHeader">
-          <div>
-            <div className="cardTitle">Календарь</div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Обзор задач, финансов, тренировок и дневника по датам
-            </div>
-          </div>
-          <div className="row">
-            <button className="btn" onClick={() => navigateMonth('prev')}>&lt;</button>
-            <span className="pill">
-              {monthNames[currentDate.month]} {currentDate.year}
-            </span>
-            <button className="btn" onClick={() => navigateMonth('next')}>&gt;</button>
-          </div>
-        </div>
-
-        <div className="calendar">
-          {/* Day headers */}
-          <div className="calendarHeader">
-            {['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'].map(day => (
-              <div key={day} className="calendarDayHeader">{day}</div>
-            ))}
-          </div>
-
-          {/* Calendar grid */}
-          <div className="calendarGrid">
-            {days.map((date, index) => {
-              const dateStr = formatDate(date)
-              const data = dayData.get(dateStr)
-              const isToday = dateStr === todayISO()
-              const isSelected = selectedDate === dateStr
-              const isCurrentMonth = isSameMonth(date, currentDate)
-
-              return (
-                <div
-                  key={index}
-                  className={`calendarDay ${!isCurrentMonth ? 'calendarDayOtherMonth' : ''} ${
-                    isToday ? 'calendarDayToday' : ''
-                  } ${isSelected ? 'calendarDaySelected' : ''}`}
-                  onClick={() => setSelectedDate(isSelected ? null : dateStr)}
-                >
-                  <div className="calendarDayNumber">{date.getDate()}</div>
-                  {data && (
-                    <div className="calendarDayContent">
-                      {data.tasks.length > 0 && (
-                        <div className="calendarIndicator calendarIndicatorTasks">
-                          {data.tasks.length}
-                        </div>
-                      )}
-                      {data.transactions.length > 0 && (
-                        <div className="calendarIndicator calendarIndicatorMoney">
-                          {data.transactions.length}
-                        </div>
-                      )}
-                      {data.workouts.length > 0 && (
-                        <div className="calendarIndicator calendarIndicatorWorkouts">
-                          {data.workouts.length}
-                        </div>
-                      )}
-                      {data.diaryEntry && (
-                        <div className="calendarIndicator calendarIndicatorDiary">
-                          Д
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </section>
-
-      <aside className="card">
-        {selectedDate ? (
-          <>
-            <div className="cardHeader">
-              <div className="cardTitle">
-                {new Date(selectedDate).toLocaleDateString('ru-RU', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })}
+    <div className="pageContainer">
+      <div className="grid2">
+        {/* Calendar */}
+        <section className="card">
+          <div className="cardHeader">
+            <div>
+              <div className="cardTitle">Календарь</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Обзор задач, финансов, тренировок и мероприятий по датам
               </div>
             </div>
-
-            {/* Diary section */}
-            <div className="field">
-              <div className="label">Дневник</div>
-              <DiaryEditor
-                date={selectedDate}
-                diary={diary}
-                onChange={onDiaryChange}
+            <div className="row">
+              <span className="pill">Месяц</span>
+              <input
+                className="input"
+                type="month"
+                value={`${currentMonth.year}-${String(currentMonth.month + 1).padStart(2, '0')}`}
+                onChange={(e) => {
+                  const [year, month] = e.target.value.split('-').map(Number)
+                  setCurrentMonth({ year, month: month - 1 })
+                }}
               />
             </div>
+          </div>
 
-            <hr className="hr" />
+          <div className="calendar">
+            <div className="calendarHeader">
+              {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => (
+                <div key={day} className="calendarDayHeader">{day}</div>
+              ))}
+            </div>
+            <div className="calendarGrid">
+              {days.map((date, index) => {
+                const dateStr = formatDate(date)
+                const data = dayData.get(dateStr)
+                const isCurrentMonth = isSameMonth(date, currentMonth)
+                const isToday = dateStr === todayISO()
+                const isSelected = selectedDate === dateStr
 
-            {/* Tasks for selected date */}
-            {selectedDayData?.tasks && selectedDayData.tasks.length > 0 && (
-              <div className="field">
-                <div className="label">Задачи ({selectedDayData.tasks.length})</div>
-                <div className="list">
-                  {selectedDayData.tasks.map(task => (
-                    <div key={task.id} className="item">
-                      <div className="itemTop">
-                        <div className="row">
+                return (
+                  <div
+                    key={index}
+                    className={`calendarDay ${!isCurrentMonth ? 'calendarDayOtherMonth' : ''} ${
+                      isToday ? 'calendarDayToday' : ''
+                    } ${isSelected ? 'calendarDaySelected' : ''}`}
+                    onClick={() => setSelectedDate(isSelected ? null : dateStr)}
+                  >
+                    <div className="calendarDayNumber">{date.getDate()}</div>
+                    {data && (
+                      <div className="calendarDayContent">
+                        {data.tasks.length > 0 && (
+                          <div className="calendarIndicator calendarIndicatorTasks">
+                            {data.tasks.length}
+                          </div>
+                        )}
+                        {data.transactions.length > 0 && (
+                          <div className="calendarIndicator calendarIndicatorMoney">
+                            {data.transactions.length}
+                          </div>
+                        )}
+                        {data.workouts.length > 0 && (
+                          <div className="calendarIndicator calendarIndicatorWorkouts">
+                            {data.workouts.length}
+                          </div>
+                        )}
+                        {data.events.length > 0 && (
+                          <div className="calendarIndicator calendarIndicatorEvents">
+                            {data.events.length}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {selectedDayData && (
+            selectedDayData.tasks.length > 0 ||
+            selectedDayData.transactions.length > 0 ||
+            selectedDayData.workouts.length > 0
+          ) && (
+            <button
+              className="btn btnGhost"
+              onClick={exportDayData}
+              title="Экспортировать все данные за этот день"
+            >
+              Экспорт дня
+            </button>
+          )}
+        </section>
+
+        {/* Day details */}
+        <section className="card">
+          <div className="cardHeader">
+            <div>
+              <div className="cardTitle">
+                {selectedDate
+                  ? new Date(selectedDate).toLocaleDateString('ru-RU', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })
+                  : 'Выберите день'
+                }
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {selectedDayData
+                  ? `${selectedDayData.tasks.length} задач · ${selectedDayData.transactions.length} операций · ${selectedDayData.workouts.length} тренировок · ${selectedDayData.events.length} мероприятий`
+                  : 'Нажмите на день в календаре, чтобы увидеть детали'
+                }
+              </div>
+            </div>
+          </div>
+
+          {!selectedDayData ? null : (
+            <>
+              {/* Tasks section */}
+              {selectedDayData.tasks.length > 0 && (
+                <div className="field">
+                  <div className="label">Задачи</div>
+                  <div className="list">
+                    {selectedDayData.tasks.map((task) => (
+                      <div key={task.id} className="item">
+                        <div className="itemTop">
+                          <div className="itemTitle">{task.title}</div>
                           <input
                             type="checkbox"
                             checked={task.done}
                             onChange={() => {
-                              const now = new Date().toISOString()
-                              onTasksChange(tasks.map(t =>
-                                t.id === task.id ? { ...t, done: !t.done, updatedAt: now } : t
-                              ))
+                              const updatedTasks = tasks.map(t =>
+                                t.id === task.id ? { ...t, done: !t.done, updatedAt: new Date().toISOString() } : t
+                              )
+                              onTasksChange(updatedTasks)
                             }}
                           />
-                          <div className={`itemTitle ${task.done ? 'done' : ''}`}>
-                            {task.title}
+                        </div>
+                        {task.notes && (
+                          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {task.notes}
+                          </div>
+                        )}
+                        {task.priority && (
+                          <div className="pill" style={{ fontSize: 10, marginTop: 4 }}>
+                            {task.priority === 'high' ? 'Высокий' :
+                             task.priority === 'med' ? 'Средний' : 'Низкий'}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Transactions section */}
+              {selectedDayData.transactions.length > 0 && (
+                <div className="field">
+                  <div className="label">Финансы</div>
+                  <div className="list">
+                    {selectedDayData.transactions.map((tx, index) => {
+                      const account = money.accounts.find(acc => acc.id === tx.accountId)
+                      return (
+                        <div key={index} className="item">
+                          <div className="itemTop">
+                            <div className="itemTitle">
+                              {tx.type === 'income' ? '+' : '-'}{fmt.format(tx.amount)}
+                            </div>
+                            <div className="muted" style={{ fontSize: 12 }}>
+                              {account?.name || 'Неизвестный счёт'}
+                            </div>
+                          </div>
+                          {tx.category && (
+                            <div className="pill" style={{ fontSize: 10, marginTop: 4 }}>
+                              {tx.category}
+                            </div>
+                          )}
+                          {tx.note && (
+                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              {tx.note}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Workouts section */}
+              {selectedDayData.workouts.length > 0 && (
+                <div className="field">
+                  <div className="label">Тренировки</div>
+                  <div className="list">
+                    {selectedDayData.workouts.map((workout) => (
+                      <div key={workout.id} className="item">
+                        <div className="itemTop">
+                          <div className="itemTitle">{workout.title}</div>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {workout.exercises.length} упражнений
                           </div>
                         </div>
+                        {workout.notes && (
+                          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {workout.notes}
+                          </div>
+                        )}
                       </div>
-                      {task.notes && <div className="muted">{task.notes}</div>}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Transactions for selected date */}
-            {selectedDayData?.transactions && selectedDayData.transactions.length > 0 && (
+              {/* Events section */}
               <div className="field">
-                <div className="label">Финансы ({selectedDayData.transactions.length})</div>
-                <div className="list">
-                  {selectedDayData.transactions.map(tx => (
-                    <div key={tx.id} className="item">
-                      <div className="itemTop">
-                        <span className="pill">{tx.category}</span>
-                        <span className="pill" style={{
-                          color: tx.type === 'income' ? '#10b981' : '#ef4444'
-                        }}>
-                          {tx.type === 'income' ? '+' : '-'}{fmt.format(tx.amount)}
-                        </span>
-                      </div>
-                      {tx.note && <div className="muted">{tx.note}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                <div className="label">Мероприятия</div>
 
-            {/* Workouts for selected date */}
-            {selectedDayData?.workouts && selectedDayData.workouts.length > 0 && (
-              <div className="field">
-                <div className="label">Тренировки ({selectedDayData.workouts.length})</div>
-                <div className="list">
-                  {selectedDayData.workouts.map(workout => (
-                    <div key={workout.id} className="item">
-                      <div className="itemTop">
-                        <span className="pill">{workout.title}</span>
-                        <span className="pill">{workout.exercises.length} упр.</span>
+                {/* Existing events */}
+                {selectedDayData.events.length > 0 && (
+                  <div className="list" style={{ marginBottom: 12 }}>
+                    {selectedDayData.events.map((event) => (
+                      <div key={event.id} className="item">
+                        <div className="itemTop">
+                          <div className="itemTitle">{event.title}</div>
+                          {event.time && (
+                            <div className="muted" style={{ fontSize: 12 }}>
+                              {event.time}
+                            </div>
+                          )}
+                        </div>
+                        {event.description && (
+                          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {event.description}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                          {event.location && (
+                            <div className="pill" style={{ fontSize: 10 }}>
+                              📍 {event.location}
+                            </div>
+                          )}
+                          {event.duration && (
+                            <div className="pill" style={{ fontSize: 10 }}>
+                              ⏱️ {event.duration} мин
+                            </div>
+                          )}
+                        </div>
+                        {event.tags.length > 0 && (
+                          <div className="row" style={{ marginTop: 8, flexWrap: 'wrap', gap: 4 }}>
+                            {event.tags.map((tag, index) => (
+                              <span key={index} className="pill" style={{ fontSize: 10, padding: '2px 6px' }}>
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {workout.notes && <div className="muted">{workout.notes}</div>}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
+
               </div>
-            )}
-          </>
-        ) : (
-          <div className="cardHeader">
-            <div className="cardTitle">Выберите дату</div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Нажмите на день в календаре, чтобы увидеть детали и дневник
+            </>
+          )}
+
+          {/* Event editor - always show when date is selected */}
+          {selectedDate && (
+            <div className="field">
+              <div className="label">Мероприятия</div>
+              <EventEditor
+                date={selectedDate}
+                events={events}
+                onChange={onEventsChange}
+              />
             </div>
-          </div>
-        )}
-      </aside>
+          )}
+        </section>
+      </div>
     </div>
   )
 }
 
-type DiaryEditorProps = {
+type EventEditorProps = {
   date: string
-  diary: DiaryEntry[]
-  onChange: (diary: DiaryEntry[]) => void
+  events: CalendarEvent[]
+  onChange: (events: CalendarEvent[]) => void
 }
 
-function DiaryEditor({ date, diary, onChange }: DiaryEditorProps) {
-  const existingEntry = diary.find(entry => entry.date === date)
-  const [content, setContent] = useState(existingEntry?.content || '')
-  const [mood, setMood] = useState<DiaryEntry['mood']>(existingEntry?.mood)
-  const [tags, setTags] = useState(existingEntry?.tags.join(', ') || '')
+function EventEditor({ date, events, onChange }: EventEditorProps) {
+  const [title, setTitle] = useState('')
+  const [time, setTime] = useState('')
+  const [duration, setDuration] = useState('')
+  const [description, setDescription] = useState('')
+  const [location, setLocation] = useState('')
+  const [color, setColor] = useState('#8b5cf6')
+  const [tags, setTags] = useState('')
 
-  const saveEntry = () => {
+  const createEvent = () => {
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) return
+
     const now = new Date().toISOString()
     const cleanTags = tags.split(',').map(t => t.trim()).filter(Boolean)
 
-    if (existingEntry) {
-      // Update existing
-      onChange(diary.map(entry =>
-        entry.id === existingEntry.id
-          ? { ...entry, content, mood, tags: cleanTags, updatedAt: now }
-          : entry
-      ))
-    } else if (content.trim()) {
-      // Create new
-      const newEntry: DiaryEntry = {
-        id: `diary-${Date.now()}`,
-        date,
-        content: content.trim(),
-        mood,
-        tags: cleanTags,
-        createdAt: now,
-        updatedAt: now,
-      }
-      onChange([...diary, newEntry])
+    const newEvent: CalendarEvent = {
+      id: uid('event'),
+      title: trimmedTitle,
+      date,
+      time: time || undefined,
+      duration: duration ? parseInt(duration) : undefined,
+      description: description.trim() || undefined,
+      location: location.trim() || undefined,
+      color,
+      tags: cleanTags,
+      createdAt: now,
+      updatedAt: now,
     }
-  }
 
-  const deleteEntry = () => {
-    if (existingEntry) {
-      onChange(diary.filter(entry => entry.id !== existingEntry.id))
-      setContent('')
-      setMood(undefined)
-      setTags('')
-    }
+    onChange([...events, newEvent])
+
+    // Clear form
+    setTitle('')
+    setTime('')
+    setDuration('')
+    setDescription('')
+    setLocation('')
+    setTags('')
   }
 
   return (
-    <div className="diaryEditor">
+    <div className="eventEditor">
+      <hr className="hr" />
+      <div className="cardHeader" style={{ marginBottom: 8 }}>
+        <div className="cardTitle">Новое мероприятие</div>
+        <div className="muted" style={{ fontSize: 12 }}>Встречи, события, напоминания</div>
+      </div>
+
       <div className="field">
-        <textarea
-          className="textarea"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Как прошёл день? Что произошло интересного?"
-          rows={4}
+        <div className="label">Название *</div>
+        <input
+          className="input"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Например: Встреча с клиентом"
         />
       </div>
 
       <div className="grid2">
         <div className="field">
-          <div className="label">Настроение</div>
-          <select
-            className="select"
-            value={mood || ''}
-            onChange={(e) => setMood(e.target.value as DiaryEntry['mood'] || undefined)}
-          >
-            <option value="">Не указано</option>
-            <option value="great">Отличное 😊</option>
-            <option value="good">Хорошее 🙂</option>
-            <option value="okay">Нормальное 😐</option>
-            <option value="bad">Плохое 😞</option>
-            <option value="terrible">Ужасное 😢</option>
-          </select>
-        </div>
-
-        <div className="field">
-          <div className="label">Теги</div>
+          <div className="label">Время</div>
           <input
             className="input"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            placeholder="работа, здоровье, семья"
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <div className="label">Длительность (мин)</div>
+          <input
+            className="input"
+            type="number"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            placeholder="60"
+            min="1"
           />
         </div>
       </div>
 
-      <div className="row" style={{ justifyContent: 'space-between', marginTop: 12 }}>
-        <button
-          className="btn"
-          onClick={deleteEntry}
-          disabled={!existingEntry}
-        >
-          Удалить
-        </button>
+      <div className="field">
+        <div className="label">Описание</div>
+        <textarea
+          className="textarea"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Подробности мероприятия..."
+          rows={2}
+        />
+      </div>
+
+      <div className="grid2">
+        <div className="field">
+          <div className="label">Место</div>
+          <input
+            className="input"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Офис, кафе, дом..."
+          />
+        </div>
+        <div className="field">
+          <div className="label">Цвет</div>
+          <input
+            className="input"
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <div className="label">Теги</div>
+        <input
+          className="input"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          placeholder="работа, личное, здоровье"
+        />
+      </div>
+
+      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
         <button
           className="btn btnPrimary"
-          onClick={saveEntry}
-          disabled={!content.trim() && !existingEntry}
+          onClick={createEvent}
+          disabled={!title.trim()}
         >
-          Сохранить
+          Создать мероприятие
         </button>
       </div>
     </div>

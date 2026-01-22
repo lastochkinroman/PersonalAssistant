@@ -58,7 +58,8 @@ export function TasksPage({ tasks, onChange }: Props) {
   }, [tasks])
 
   return (
-    <div className="grid2">
+    <div className="pageContainer">
+      <div className="grid2">
       <section className="card">
         <div className="cardHeader">
           <div>
@@ -219,6 +220,7 @@ export function TasksPage({ tasks, onChange }: Props) {
           </button>
         </div>
       </aside>
+    </div>
     </div>
   )
 }

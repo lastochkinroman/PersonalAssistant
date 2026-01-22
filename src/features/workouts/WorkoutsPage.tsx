@@ -50,7 +50,8 @@ export function WorkoutsPage({ workouts, onChange }: Props) {
   }, [workouts])
 
   return (
-    <div className="grid2">
+    <div className="pageContainer">
+      <div className="grid2">
       <section className="card">
         <div className="cardHeader">
           <div>
@@ -298,6 +299,7 @@ export function WorkoutsPage({ workouts, onChange }: Props) {
           </button>
         </div>
       </aside>
+    </div>
     </div>
   )
 }
