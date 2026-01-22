@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Note, NoteFolder } from '../../lib/appData'
 import { uid } from '../../lib/ids'
@@ -370,7 +370,7 @@ function NoteEditor({ note, onUpdate, onDelete }: NoteEditorProps) {
     setTimeout(saveNote, 1000)
   }
 
-  const insertText = (before: string, after: string = '', placeholder: string = 'текст') => {
+  const insertText = useCallback((before: string, after: string = '', placeholder: string = 'текст') => {
     const textarea = textareaRef.current
     if (!textarea) return
 
@@ -388,19 +388,19 @@ function NoteEditor({ note, onUpdate, onDelete }: NoteEditorProps) {
       const newCursorPos = start + before.length + textToInsert.length
       textarea.setSelectionRange(newCursorPos, newCursorPos)
     }, 0)
-  }
+  }, [content, setContent])
 
   const formattingActions = [
-    { label: 'H1', action: () => insertText('# ', '\n\n', 'Заголовок'), icon: 'H₁' },
-    { label: 'H2', action: () => insertText('## ', '\n\n', 'Заголовок'), icon: 'H₂' },
-    { label: 'H3', action: () => insertText('### ', '\n\n', 'Заголовок'), icon: 'H₃' },
-    { label: 'Жирный', action: () => insertText('**', '**', 'жирный текст'), icon: 'B' },
-    { label: 'Курсив', action: () => insertText('*', '*', 'курсив'), icon: 'I' },
-    { label: 'Код', action: () => insertText('`', '`', 'код'), icon: '</>' },
-    { label: 'Ссылка', action: () => insertText('[', '](url)', 'текст ссылки'), icon: '🔗' },
-    { label: 'Список', action: () => insertText('- ', '\n', 'элемент списка'), icon: '•' },
-    { label: 'Нум. список', action: () => insertText('1. ', '\n', 'элемент списка'), icon: '1.' },
-    { label: 'Цитата', action: () => insertText('> ', '\n\n', 'цитата'), icon: '"' },
+    { label: 'H1', before: '# ', after: '\n\n', placeholder: 'Заголовок', icon: 'H₁' },
+    { label: 'H2', before: '## ', after: '\n\n', placeholder: 'Заголовок', icon: 'H₂' },
+    { label: 'H3', before: '### ', after: '\n\n', placeholder: 'Заголовок', icon: 'H₃' },
+    { label: 'Жирный', before: '**', after: '**', placeholder: 'жирный текст', icon: 'B' },
+    { label: 'Курсив', before: '*', after: '*', placeholder: 'курсив', icon: 'I' },
+    { label: 'Код', before: '`', after: '`', placeholder: 'код', icon: '</>' },
+    { label: 'Ссылка', before: '[', after: '](url)', placeholder: 'текст ссылки', icon: '🔗' },
+    { label: 'Список', before: '- ', after: '\n', placeholder: 'элемент списка', icon: '•' },
+    { label: 'Нум. список', before: '1. ', after: '\n', placeholder: 'элемент списка', icon: '1.' },
+    { label: 'Цитата', before: '> ', after: '\n\n', placeholder: 'цитата', icon: '"' },
   ]
 
   return (
@@ -465,7 +465,7 @@ function NoteEditor({ note, onUpdate, onDelete }: NoteEditorProps) {
           <button
             key={index}
             className="notesToolbarBtn"
-            onClick={action.action}
+            onClick={() => insertText(action.before, action.after, action.placeholder)}
             title={action.label}
           >
             {action.icon}

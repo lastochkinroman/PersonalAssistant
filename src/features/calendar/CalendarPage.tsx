@@ -95,7 +95,7 @@ export function CalendarPage({
     }
 
     return map
-  }, [tasks, money.transactions, workouts, events])
+  }, [tasks, money, workouts, events])
 
   const selectedDayData = selectedDate ? dayData.get(selectedDate) : null
 

@@ -12,6 +12,10 @@ export function exportJson(data: unknown, filename: string) {
 
 export async function importJsonFromFile<T>(file: File): Promise<T> {
   const raw = await file.text()
-  return JSON.parse(raw) as T
+  try {
+    return JSON.parse(raw) as T
+  } catch (error) {
+    throw new Error(`Неверный формат JSON файла: ${error instanceof Error ? error.message : 'неизвестная ошибка'}`)
+  }
 }
 
