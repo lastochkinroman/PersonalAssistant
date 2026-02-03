@@ -1,0 +1,44 @@
+models:
+  # Легкие модели для CPU
+  cpu_models:
+    - name: "Qwen/Qwen2.5-0.5B-Instruct"
+      min_cpu_memory_gb: 2
+      max_response_tokens: 512
+  
+  # Модели для GPU с разным объемом памяти
+  gpu_models:
+    - name: "Qwen/Qwen2.5-0.5B-Instruct"
+      min_gpu_memory_gb: 1
+      recommended_for: "testing"
+    
+    - name: "Qwen/Qwen2.5-1.5B-Instruct"
+      min_gpu_memory_gb: 4
+      recommended_for: "general"
+      quantized: true
+    
+    - name: "Qwen/Qwen2.5-3B-Instruct"
+      min_gpu_memory_gb: 8
+      recommended_for: "quality"
+      quantized: true
+    
+    - name: "Qwen/Qwen2.5-4B-Instruct"
+      min_gpu_memory_gb: 12
+      recommended_for: "professional"
+      quantized: true
+    
+    - name: "Qwen/Qwen2.5-7B-Instruct"
+      min_gpu_memory_gb: 16
+      recommended_for: "maximum_quality"
+      quantized: true
+
+inference:
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.1
+  timeout_seconds: 60
+
+system:
+  auto_select_model: true
+  fallback_to_cpu: true
+  clear_cache_on_error: true
