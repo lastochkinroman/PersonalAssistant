@@ -1,15 +1,24 @@
+"""
+Основной FastAPI сервер с поддержкой локальных и API моделей
+"""
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import uvicorn
-import gc
-import json
+from datetime import datetime
 
-app = FastAPI(title="AI Assistant API")
+from ai.core import Config
+from ai.model_manager import ModelManager
+from ai.local_model import LocalModel
 
+app = FastAPI(
+    title="Personal Assistant AI API",
+    description="Гибридный AI ассистент с локальными моделями и Mistral API",
+    version="4.0.0"
+)
+
+# Настройка CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,352 +47,225 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     context: DailyContext
 
-# Глобальные переменные
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
-model = None
-tokenizer = None
-model_loaded = False
+class ModelSwitchRequest(BaseModel):
+    provider: str  # "api" или "local"
+    model_name: str
 
-def load_model():
-    global model, tokenizer, model_loaded
-    
-    print(f"🤖 Загрузка модели {MODEL_NAME}...")
-    
-    try:
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
-        # Загружаем токенизатор с правильными настройками
-        tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True,
-            padding_side="left"  # Важно для генерации!
-        )
-        
-        # Устанавливаем pad_token если его нет
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Настройки для загрузки
-        load_config = {
-            "trust_remote_code": True,
-            "low_cpu_mem_usage": True,
-        }
-        
-        if torch.cuda.is_available():
-            print("🎮 Используем GPU с квантованием для 4GB памяти")
-            from transformers import BitsAndBytesConfig
-            
-            # Для 4GB GPU используем 4-битное квантование
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-            )
-            
-            load_config.update({
-                "quantization_config": bnb_config,
-                "device_map": "auto",
-                "torch_dtype": torch.float16,
-            })
-        else:
-            print("💻 Используем CPU")
-            load_config.update({
-                "device_map": "cpu",
-                "torch_dtype": torch.float32,
-            })
-        
-        # Загружаем модель
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            **load_config
-        )
-        
-        model.eval()
-        model_loaded = True
-        
-        device = next(model.parameters()).device
-        print(f"✅ Модель загружена на: {device}")
-        
-        if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated() / 1e9
-            print(f"💾 Использовано памяти GPU: {allocated:.2f} GB")
-        
-    except Exception as e:
-        print(f"❌ Ошибка загрузки модели: {e}")
-        
-        # Fallback на CPU версию
-        try:
-            print("🔄 Пробуем загрузить на CPU...")
-            tokenizer = AutoTokenizer.from_pretrained(
-                MODEL_NAME,
-                trust_remote_code=True
-            )
-            
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            
-            model = AutoModelForCausalLM.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.float32,
-                device_map="cpu",
-                trust_remote_code=True
-            )
-            
-            model.eval()
-            model_loaded = True
-            print("✅ Модель загружена на CPU")
-        except Exception as e2:
-            print(f"❌ Критическая ошибка: {e2}")
-            model_loaded = False
-
-def create_chat_prompt(messages: List[ChatMessage], context: DailyContext) -> str:
-    """Создает правильный промпт для чата"""
-    
-    # Формируем системное сообщение
-    system_prompt = """Ты — полезный персональный AI-ассистент. У тебя есть данные о дне пользователя.
-
-Данные пользователя:"""
-    
-    # Добавляем информацию о данных
-    data_info = f"""
-Дата: {context.date}
-
-Статистика:
-- Задачи: {len(context.tasks)}
-- Финансы: {len(context.finances or context.money or [])}
-- Тренировки: {len(context.workouts)}
-- Дневник: {len(context.diary)}
-- События: {len(context.events)}
-- Заметки: {len(context.notes)}
-"""
-    
-    # Формируем историю диалога
-    chat_history = ""
-    for msg in messages[-5:]:  # Берем последние 5 сообщений
-        if msg.role == "user":
-            chat_history += f"Пользователь: {msg.content}\n"
-        elif msg.role == "assistant":
-            chat_history += f"Ассистент: {msg.content}\n"
-    
-    # Собираем финальный промпт
-    prompt = f"""<|im_start|>system
-{system_prompt}
-{data_info}
-
-Твоя задача:
-1. Отвечать на вопросы пользователя
-2. Давать полезные советы на основе его данных
-3. Быть дружелюбным и понятным
-4. Отвечать кратко и по делу
-5. Не выдумывать информацию
-<|im_end|>
-
-{chat_history}
-<|im_start|>assistant
-"""
-    
-    return prompt
+# Глобальные объекты
+config = Config()
+model_manager = ModelManager(config)
 
 @app.on_event("startup")
 async def startup_event():
     print("=" * 60)
-    print("🚀 Запуск исправленного AI бэкенда")
+    print("🚀 Запуск гибридного AI бэкенда")
     print("=" * 60)
     
+    # Показываем информацию о системе
+    system_info = model_manager.get_system_info()
+    
     print(f"\n📊 Информация о системе:")
-    print(f"PyTorch: {torch.__version__}")
-    print(f"CUDA доступно: {torch.cuda.is_available()}")
+    print(f"  PyTorch: {system_info['system']['torch_version']}")
+    print(f"  CUDA доступно: {system_info['system']['cuda_available']}")
     
-    if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-        memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-        print(f"Память GPU: {memory:.1f} GB")
+    if system_info['system']['cuda_available']:
+        print(f"  GPU: {system_info['system']['gpu_name']}")
+        print(f"  Память GPU: {system_info['system']['gpu_memory_gb']:.1f} GB")
     
-    print(f"\n🤖 Модель: {MODEL_NAME}")
+    print(f"\n🤖 Текущая модель:")
+    print(f"  Провайдер: {system_info['current_model']['provider']}")
+    print(f"  Модель: {system_info['current_model']['name']}")
+    print(f"  Доступна: {system_info['current_model']['available']}")
+    
     print("\n" + "=" * 60)
-    
-    load_model()
 
 @app.get("/")
 async def root():
+    current_model = model_manager.get_current_model()
+    model_info = current_model.get_info() if current_model else {}
+    
     return {
         "message": "Personal Assistant AI API",
-        "model": MODEL_NAME,
-        "loaded": model_loaded,
-        "cuda": torch.cuda.is_available()
+        "version": "4.0.0",
+        "model": model_info
     }
 
-@app.get("/api/health")
+@app.get("/health")
 async def health():
+    current_model = model_manager.get_current_model()
+    
     return {
-        "status": "healthy" if model_loaded else "loading",
-        "model_loaded": model_loaded,
-        "model": MODEL_NAME,
-        "cuda_available": torch.cuda.is_available()
-    }
-
-@app.get("/api/model/status")
-async def model_status():
-    return {
-        "status": "loaded" if model_loaded else "loading",
-        "model_loaded": model_loaded,
-        "model": MODEL_NAME,
-        "cuda_available": torch.cuda.is_available()
-    }
-
-@app.get("/api/model/info")
-async def model_info():
-    return {
-        "model": MODEL_NAME,
-        "loaded": model_loaded,
-        "cuda_available": torch.cuda.is_available()
-    }
-
-@app.get("/api/model/available")
-async def available_models():
-    return {
-        "models": [MODEL_NAME],
-        "current": MODEL_NAME
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "current_model": {
+            "provider": model_manager.current_provider,
+            "name": model_manager.current_model_name,
+            "available": current_model.is_available() if current_model else False
+        },
+        "system": model_manager.get_system_info()['system']
     }
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    if not model_loaded:
-        raise HTTPException(status_code=503, detail="Модель еще не загружена")
+    """Основной эндпоинт для чата"""
+    current_model = model_manager.get_current_model()
+    
+    if not current_model or not current_model.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Текущая модель недоступна. Попробуйте переключить модель."
+        )
     
     try:
-        # Создаем правильный промпт
-        prompt = create_chat_prompt(request.messages, request.context)
+        # Преобразуем сообщения в формат для модели
+        messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.messages
+        ]
         
-        print("\n📝 Промпт для модели:")
-        print("-" * 40)
-        print(prompt[-500:])  # Показываем последние 500 символов
-        print("-" * 40)
+        # Преобразуем контекст
+        context = request.context.dict()
         
-        # Токенизация
-        inputs = tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=2048,
-            padding=True
-        )
-        
-        # Перемещаем на правильное устройство
-        device = next(model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        print(f"📏 Длина промпта: {inputs['input_ids'].shape[1]} токенов")
-        
-        # Генерация с правильными параметрами
-        with torch.no_grad():
-            # Очищаем кэш перед генерацией
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=300,  # Увеличиваем для более полных ответов
-                temperature=0.8,     # Немного повышаем для разнообразия
-                top_p=0.95,          # nucleus sampling
-                top_k=50,           # ограничиваем топ-k
-                do_sample=True,     # используем sampling
-                repetition_penalty=1.1,  # штраф за повторения
-                no_repeat_ngram_size=3,  # избегаем повторения n-грамм
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-        
-        # Декодируем ТОЛЬКО сгенерированную часть
-        generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
-        response_text = tokenizer.decode(
-            generated_ids,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=True
-        )
-        
-        # Убираем возможные артефакты
-        response_text = response_text.strip()
-        
-        # Обрезаем по стоп-символам если нужно
-        stop_sequences = ["<|im_end|>", "</s>", "\n\nПользователь:", "\nПользователь:"]
-        for stop_seq in stop_sequences:
-            if stop_seq in response_text:
-                response_text = response_text.split(stop_seq)[0]
-        
-        print(f"\n🤖 Ответ модели ({len(response_text)} символов):")
-        print("-" * 40)
-        print(response_text[:500])
-        print("-" * 40)
-        
-        # Если ответ слишком короткий или странный
-        if len(response_text) < 10:
-            response_text = "Привет! Чем могу помочь? Вижу у тебя пока мало данных за сегодня. Расскажи, что планируешь сделать?"
-        
-        # Очищаем память
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # Генерация ответа
+        response_text = current_model.generate(messages, context)
         
         return {
             "success": True,
             "response": response_text,
-            "model": MODEL_NAME,
-            "prompt_length": inputs['input_ids'].shape[1],
-            "response_length": len(response_text)
+            "model": {
+                "provider": model_manager.current_provider,
+                "name": model_manager.current_model_name
+            },
+            "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"❌ Ошибка генерации: {error_details}")
-        
-        # Возвращаем запасной ответ
-        return {
-            "success": True,
-            "response": "Привет! Я ваш AI-ассистент. Вижу, что сегодня у вас пока нет записей. Расскажите, чем могу помочь?",
-            "error": str(e),
-            "fallback": True
-        }
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка генерации: {str(e)}"
+        )
 
-@app.get("/api/debug/prompt")
-async def debug_prompt():
-    """Эндпоинт для отладки формата промпта"""
-    test_messages = [
-        ChatMessage(role="user", content="привет", timestamp="2024-01-01T10:00:00")
-    ]
-    
-    test_context = DailyContext(
-        date="2024-01-01",
-        tasks=[],
-        finances=[],
-        workouts=[],
-        diary=[],
-        events=[],
-        notes=[]
-    )
-    
-    prompt = create_chat_prompt(test_messages, test_context)
+@app.get("/api/models/available")
+async def get_available_models():
+    """Получение списка доступных моделей"""
+    available = model_manager.get_available_models()
+    system_info = model_manager.get_system_info()
     
     return {
-        "prompt": prompt,
-        "prompt_length": len(prompt),
-        "model": MODEL_NAME
+        "api": available['api'],
+        "local": available['local'],
+        "current": {
+            "provider": model_manager.current_provider,
+            "name": model_manager.current_model_name
+        },
+        "system": system_info['system']
     }
+
+@app.post("/api/models/switch")
+async def switch_model(request: ModelSwitchRequest):
+    """Переключение модели"""
+    try:
+        success = False
+        
+        if request.provider == "api":
+            success = model_manager.switch_to_api(request.model_name)
+        elif request.provider == "local":
+            success = model_manager.switch_to_local(request.model_name)
+        else:
+            raise HTTPException(status_code=400, detail="Неизвестный провайдер")
+        
+        if success:
+            current_model = model_manager.get_current_model()
+            
+            return {
+                "success": True,
+                "message": f"Модель переключена на {request.model_name} ({request.provider})",
+                "current_model": {
+                    "provider": model_manager.current_provider,
+                    "name": model_manager.current_model_name,
+                    "info": current_model.get_info() if current_model else {}
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Не удалось переключиться на модель {request.model_name}"
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/models/current")
+async def get_current_model():
+    """Получение информации о текущей модели"""
+    current_model = model_manager.get_current_model()
+    
+    if not current_model:
+        raise HTTPException(status_code=404, detail="Модель не загружена")
+    
+    return {
+        "provider": model_manager.current_provider,
+        "name": model_manager.current_model_name,
+        "info": current_model.get_info(),
+        "available": current_model.is_available()
+    }
+
+@app.get("/api/model/status")
+async def get_model_status():
+    """Получение статуса текущей модели (для совместимости с фронтендом)"""
+    current_model = model_manager.get_current_model()
+    
+    if not current_model:
+        raise HTTPException(status_code=404, detail="Модель не загружена")
+    
+    return {
+        "loaded": current_model.is_available(),
+        "model_name": model_manager.current_model_name,
+        "device": "cuda" if model_manager.get_system_info()['system']['cuda_available'] else "cpu",
+        "estimated_memory": "4GB",
+        "cuda_available": model_manager.get_system_info()['system']['cuda_available']
+    }
+
+@app.post("/api/models/reload")
+async def reload_model():
+    """Перезагрузка текущей модели (для локальных моделей)"""
+    if model_manager.current_provider != "local":
+        raise HTTPException(
+            status_code=400, 
+            detail="Перезагрузка доступна только для локальных моделей"
+        )
+    
+    current_model = model_manager.get_current_model()
+    if isinstance(current_model, LocalModel):
+        success = current_model.load()
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Локальная модель перезагружена"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Не удалось перезагрузить локальную модель"
+            )
+
+@app.get("/api/system/info")
+async def get_system_info():
+    """Получение информации о системе"""
+    return model_manager.get_system_info()
 
 if __name__ == "__main__":
     print("\n🌐 Сервер запускается...")
     print("📍 http://localhost:8000")
     print("📊 Проверка: http://localhost:8000/health")
-    print("🐛 Отладка промпта: http://localhost:8000/api/debug/prompt")
+    print("🤖 Модели: http://localhost:8000/api/models/available")
     print("\nНажмите Ctrl+C для остановки\n")
     
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=8000,
-        reload=False,  # Отключаем reload для стабильности
+        reload=False,
         log_level="info"
     )

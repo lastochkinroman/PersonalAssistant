@@ -1,44 +1,42 @@
+defaults:
+  model: mistral-medium-latest
+  provider: api
+local:
+  device: auto
+  max_memory: 4GB
+  quantization: 4bit
+mistral:
+  api_key: 1ra89PMYb4d9ppsDfiQVWLAcBypbhoBs
+  base_url: https://api.mistral.ai/v1
+  timeout: 30
 models:
-  # Легкие модели для CPU
-  cpu_models:
-    - name: "Qwen/Qwen2.5-0.5B-Instruct"
-      min_cpu_memory_gb: 2
-      max_response_tokens: 512
-  
-  # Модели для GPU с разным объемом памяти
-  gpu_models:
-    - name: "Qwen/Qwen2.5-0.5B-Instruct"
-      min_gpu_memory_gb: 1
-      recommended_for: "testing"
-    
-    - name: "Qwen/Qwen2.5-1.5B-Instruct"
-      min_gpu_memory_gb: 4
-      recommended_for: "general"
-      quantized: true
-    
-    - name: "Qwen/Qwen2.5-3B-Instruct"
-      min_gpu_memory_gb: 8
-      recommended_for: "quality"
-      quantized: true
-    
-    - name: "Qwen/Qwen2.5-4B-Instruct"
-      min_gpu_memory_gb: 12
-      recommended_for: "professional"
-      quantized: true
-    
-    - name: "Qwen/Qwen2.5-7B-Instruct"
-      min_gpu_memory_gb: 16
-      recommended_for: "maximum_quality"
-      quantized: true
-
-inference:
-  max_new_tokens: 512
-  temperature: 0.7
-  top_p: 0.9
-  repetition_penalty: 1.1
-  timeout_seconds: 60
-
-system:
-  auto_select_model: true
-  fallback_to_cpu: true
-  clear_cache_on_error: true
+  api:
+    available:
+    - description: Mistral Small - быстрая и недорогая
+      id: mistral-small
+      name: mistral-small-latest
+      provider: mistral
+    - description: Mistral Medium - хороший баланс
+      id: mistral-medium
+      name: mistral-medium-latest
+      provider: mistral
+    - description: Mistral Large - максимальное качество
+      id: mistral-large
+      name: mistral-large-latest
+      provider: mistral
+    default: mistral-small-latest
+  local:
+    available:
+    - description: Легкая модель для CPU/слабых GPU
+      id: qwen-0.5b
+      name: Qwen/Qwen2.5-0.5B-Instruct
+      size_gb: 1.0
+    - description: Баланс скорости и качества
+      id: qwen-1.5b
+      name: Qwen/Qwen2.5-1.5B-Instruct
+      size_gb: 3.0
+    - description: Быстрая и умная маленькая модель
+      id: phi-2
+      name: microsoft/phi-2
+      size_gb: 5.0
+    default: Qwen/Qwen2.5-0.5B-Instruct

@@ -6,6 +6,8 @@ import { WorkoutsPage } from './features/workouts/WorkoutsPage'
 import { CalendarPage } from './features/calendar/CalendarPage'
 import { DiaryPage } from './features/diary/DiaryPage'
 import { NotesPage } from './features/notes/NotesPage'
+import { AIAssistant } from './features/ai-assistant/AIAssistant'
+import './features/ai-assistant/AIAssistant.css'
 import type { AppDataV1 } from './lib/appData'
 import { APP_DATA_LS_KEY, createEmptyAppDataV1 } from './lib/appData'
 import { exportJson, importJsonFromFile } from './lib/jsonIO'
@@ -314,6 +316,15 @@ export default function App() {
       {status ? <div className="statusBar">{status}</div> : null}
 
       <main className="main">{content}</main>
+      
+      {/* AI Assistant */}
+      <AIAssistant 
+        data={data} 
+        onDataUpdate={() => {
+          // При обновлении данных можно выполнить дополнительные действия
+          console.log('Данные обновлены, AI может пересчитать контекст')
+        }}
+      />
     </div>
   )
 }
