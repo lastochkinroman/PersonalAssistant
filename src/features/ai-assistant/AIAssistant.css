@@ -77,13 +77,13 @@
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
-.ai-status-indicator {
+/* .ai-status-indicator {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #4caf50;
   box-shadow: 0 0 4px rgba(76, 175, 80, 0.6);
-}
+} */
 
 .day-score {
   margin-left: 4px;

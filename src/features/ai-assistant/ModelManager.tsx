@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { apiClient } from '../../lib/api-client'
 import type { AvailableModels, CurrentModelInfo } from '../../lib/api-types'
 import './ModelManager.css'

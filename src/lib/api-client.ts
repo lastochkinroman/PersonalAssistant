@@ -2,9 +2,7 @@ import type {
   ChatRequest,
   ChatResponse,
   ModelStatus,
-  HealthCheck,
-  AvailableModelsResponse,
-  SwitchModelResponse
+  HealthCheck
 } from './api-types'
 import type { CurrentModelInfo, AvailableModels, SwitchModelRequestNew } from './api-types'
 
